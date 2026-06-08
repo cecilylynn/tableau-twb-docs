@@ -61,7 +61,7 @@ Create a Python script that:
 | **ROWS** | `table > rows` text | Same as columns |
 | **MARKS** | `pane > mark[@class]` + `pane > encodings > *` | Mark Type, then per-encoding lines: Color, Size, Shape, Wedge Size, Detail, Label, Tooltip |
 | **TOOLTIP DETAILS** | `customized-tooltip > formatted-text > run` | Include formatting metadata: `[FontName, 14pt, Bold, #color]` |
-| **TABLE CALC** | `.//table-calc` inside `<column-instance>` (shelf-level only) | Compute Using direction, Specific Dimensions with checked fields, sort order. Ignore calc-level table-calcs (inside `<calculation>`) — those are formula defaults, not user config. |
+| **TABLE CALC** | `.//table-calc` inside `<column-instance>` (shelf-level only) | Include aggregation (`derivation` attr → CNTD, SUM, etc.), table calc type (`type` attr → % of Total, Running Total, etc.), compute direction, Specific Dimensions with checked fields. Ignore calc-level table-calcs (inside `<calculation>`). |
 | **STYLE/FORMATTING** | `style-rule > format` elements | Cell, header, label, table formatting |
 | **DASHBOARD ACTIONS** | `root.findall(".//action")` | Type, trigger, target, exclude-sheet logic |
 
@@ -118,7 +118,7 @@ For **action captions**: resolve `<ATTR([ds].[col])>` patterns using the same fi
 
 For **tooltip/label formatted text**: resolve `<[ds].[col]>` references inline, and capture formatting attributes (`bold`, `fontcolor`, `fontsize`, `fontname`, `italic`, `underline`) per run.
 
-For **COLUMNS / ROWS shelf fields**: after resolving the field name, check `formula_map` — if the field is a calculated field, append its formula with `::` separator so a future developer can recreate the calc. Use `_resolve_formula()` to replace any `[Calculation_xxx]` refs in the formula with their captions. Example output: `AGG([Profit Ratio])  ::  SUM([Profit]) / SUM([Sales])`
+For **COLUMNS / ROWS shelf fields**: after resolving the field name, check `formula_map` — if the field is a calculated field, append its formula with `::` separator so a future developer can recreate the calc. Use `_resolve_formula()` to replace any `[Calculation_xxx]` refs in the formula with their captions. Example output: `AGG([Margin %])  ::  SUM([Revenue]) / SUM([Cost])`
 
 ### Step 5b: Extract Table Calc Configuration
 
@@ -137,7 +137,11 @@ def _resolve_table_calc(tc, parent_map, fm):
     elif parent.tag == "column-instance":  # shelf-level → document
         kind = "shelf"
         field_name = resolve(parent.get("column", ""), fm)
+        derivation = parent.get("derivation", "")  # e.g. CountD, Sum
+    tc_type = tc.get("type", "")  # e.g. PctTotal, RunTotal
 ```
+
+The **`derivation`** attribute on the `column-instance` tells you the aggregation (CountD → CNTD, Sum → SUM, etc.). The **`type`** attribute on the `<table-calc>` element tells you the table calc type (PctTotal → % of Total, RunTotal → Running Total, etc.). Both must be included in the caption output.
 
 The `ordering-type` attribute maps to Tableau UI labels:
 
@@ -150,20 +154,21 @@ The `ordering-type` attribute maps to Tableau UI labels:
 When `ordering-type="Field"`, the `<order>` child elements list the **checked dimensions**:
 
 ```xml
-<column-instance column="[Calc_123]" derivation="User" ...>
-  <table-calc ordering-type="Columns" />           <!-- secondary config -->
-  <table-calc field="[ds].[sort_field]" ordering-type="Field"> <!-- Specific Dims -->
-    <order field="[ds].[none:metric:nk]" />          <!-- checked ✓ -->
-    <order field="[ds].[Calculation_456]" />          <!-- checked ✓ -->
-  </table-calc>
+<column-instance column="[Calc_123]" derivation="CountD" ...>
+  <table-calc type="PctTotal" ordering-type="Rows" />
 </column-instance>
 ```
 
 Caption output should look like:
 ```
-[Running Total Sales]: Compute Using Specific Dimensions
+% of Total of CNTD([Order ID]): Compute Using Table (down)
+```
+
+Or for Specific Dimensions:
+```
+Running Total of SUM([Revenue]): Compute Using Specific Dimensions
     Checked: Category, Sub-Category, Region
-    Sort order: Specific Dimensions (by [WINDOW_MAX Sales])
+    Sort order: Specific Dimensions (by [WINDOW_MAX Revenue])
 ```
 
 For fields using `ordering-type="Field"`, also resolve the `<order>` field references through the field map. Use `_resolve_bare()` which handles both `[ds].[col]` patterns and bare `[Calculation_xxx]` lookups.
@@ -245,7 +250,10 @@ The Developer Notes sheet is built into the template script's `add_developer_not
 | `show-labels` attribute on `customized-label` | D2E8DA72 error | Use `style-rule > format[@attr="mark-labels-show"]` inside the pane `<style>` instead |
 | Including calc-level `<table-calc>` in captions | Caption lists internal formula defaults that aren't on the sheet — confusing and wrong | Only document shelf-level table-calcs (parent is `<column-instance>`). Ignore calc-level (parent is `<calculation>`). |
 | Showing `ordering-type` raw XML values | `Rows`, `Columns`, `Field` mean nothing to a Tableau practitioner | Map to UI labels: Rows→Table (down), Columns→Table (across), Field→Specific Dimensions |
+| Table calc missing aggregation and type | `[Order ID]: Compute Using Table (down)` — should be `% of Total of CNTD([Order ID])` | Read `derivation` attr from `column-instance` (CountD→CNTD, Sum→SUM) and `type` attr from `<table-calc>` (PctTotal→% of Total, RunTotal→Running Total) |
+| Nested shelf aggregation qualifiers not resolved | `pcto:ctd:order_id:qk` resolves to raw text instead of `% of Total of CNTD([Order ID])` | `resolve_shelf()` must iteratively strip agg prefixes (pcto, ctd, sum, etc.) and join them with " of " |
 | Calculated fields on shelves shown without formula | `AGG([donut])` is not enough to recreate the sheet — you need to know what the calc does | Look up field name in `formula_map`; if found, append `  ::  {resolved_formula}` after the field display |
+| Ad-hoc shelf calcs missing from `formula_map` | `build_formula_map` only scans `<datasource>` but ad-hoc calcs (//rename trick) live in `<datasource-dependencies>` inside worksheets | Scan both `root.findall(".//datasource")` AND `root.findall(".//datasource-dependencies")` for columns with formulas |
 
 ## Template Script
 
