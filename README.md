@@ -1,5 +1,7 @@
 # Tableau Workbook Auto-Documentation Skill
 
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/c38b91d4-edb9-4235-a5e0-ae9712a93944" />
+
 **Document to Protect** — Auto-generate structured documentation captions for every worksheet in a Tableau workbook through AI agents.
 
 Give your AI coding assistant a `.twb` or `.twbx` file. Get back a fully documented workbook — every worksheet captioned with its purpose, filters, shelf contents, marks, table calcs, formatting, and dashboard actions — ready to open in Tableau Desktop.
